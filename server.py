@@ -3,68 +3,95 @@ import threading
 import re
 from typing import Optional
 
-
-def receive_connection() -> None:
-    while True:
-        client, address = server.accept()
-        print(f'Connected from {str(address)}')
-        message_thread = threading.Thread(target=get_a_message_from_client, args=(client,))
-        message_thread.start()
+from bidict import bidict
 
 
-def get_client_nickname(client: socket.socket) -> None:
-    client.send('Input your nickname: '.encode('utf-8'))
-    nickname = client.recv(1024).decode('utf-8')
-    while nickname in clients.values():
-        client.send('This nickname already exists, please try again: '.encode('utf-8'))
-        nickname = client.recv(1024).decode('utf-8')
-    message_for_all_clients(f'{nickname} connected to the chat')
-    clients[client] = nickname
-    client.send(f'You are connect to the chat as {nickname}'.encode('utf-8'))
-
-
-def handle_command(message: str) -> tuple[str, Optional[str]]:
-    if message.startswith('/members'):
-        response = f'Current members: {[member for member in clients.values()]}'
-        return (response, None)
-    elif message.startswith('/to'):
-        receiver = re.search(r'(?<=/to ).+?(?=\s)', message)[0]
-        regular_expression = f'(?<=^/to {receiver} ).+'
-        response = re.search(regular_expression, message)[0]
-        return (response, receiver)
-
-
-def get_a_message_from_client(client: socket.socket) -> None:
-    get_client_nickname(client)
-    while True:
-        try:
-            message = client.recv(1024).decode('utf-8')
-            if message.startswith('/'):
-                #TODO add handler command
-                handle_command(message)
-            message_for_all_clients(f'{clients[client]}: {message}')
-        except:
-            nickname = clients.pop(client)
-            print(f'{nickname} left the chat')
-            message_for_all_clients(f'{nickname} left the chat')
-            break
-
-
-def message_for_all_clients(message: str) -> None:
-    for client in clients.keys():
-        client.send(message.encode('utf-8'))
-
-
-if __name__ == '__main__':
+class Server:
     HOST: str = '127.0.0.1'
     PORT: int = 3228
     NUMBER_OF_WAITING_CONNECTIONS: int = 5
 
-    clients: dict[socket.socket, str] = {}
+    clients: bidict[socket.socket, str] = bidict()
 
     server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen(NUMBER_OF_WAITING_CONNECTIONS)
 
-    print('Server start working...')
-    receive_connection()
+    def __init__(self):
+        self.server.bind((self.HOST, self.PORT))
+        self.server.listen(self.NUMBER_OF_WAITING_CONNECTIONS)
+        print('Server start working...')
+        self._receive_connection()
+
+    def _receive_connection(self) -> None:
+        while True:
+            client, address = self.server.accept()
+            print(f'Connected from {str(address)}')
+            message_thread = threading.Thread(target=self._get_a_message_from_client, args=(client,))
+            message_thread.start()
+
+    def _get_a_message_from_client(self, client: socket.socket) -> None:
+        self._set_client_nickname(client)
+        while True:
+            try:
+                message = client.recv(1024).decode('utf-8')
+                if message.startswith('/'):
+                    self._handle_command(message, client)
+                else:
+                    self._message_for_all_clients(f'{self.clients[client]}: {message}')
+            except:
+                nickname = self.clients.pop(client)
+                print(f'{nickname} left the chat')
+                self._message_for_all_clients(f'{nickname} left the chat')
+                break
+
+    def _message_for_all_clients(self, message: str) -> None:
+        for client in self.clients.keys():
+            client.send(message.encode('utf-8'))
+
+    def _set_client_nickname(self, client: socket.socket) -> None:
+        client.send('Input your nickname: '.encode('utf-8'))
+        nickname = client.recv(1024).decode('utf-8')
+        while nickname in self.clients.values():
+            client.send('This nickname already exists, please try again: '.encode('utf-8'))
+            nickname = client.recv(1024).decode('utf-8')
+        self._message_for_all_clients(f'{nickname} connected to the chat')
+        self.clients[client] = nickname
+        client.send(
+            f'You are connect to the chat as {nickname}\nInput "/commands" to get a list of commands'.encode('utf-8'))
+
+    def _handle_command(self, message: str, client: socket.socket) -> None:
+        receiver_client = None
+        if message.startswith('/members'):
+            response = f'Current members: {[member for member in self.clients.values()]}'
+        elif message.startswith('/to'):
+            response, receiver_client = self._get_receiver_and_message(message)
+        elif message.startswith('/commands'):
+            response = 'Commands:\n- "/members" list of current members\n' \
+                       '- "/to <nickname>" send private message to member with nickname <nickname>'
+        else:
+            response = 'Command not found'
+
+        if receiver_client:
+            self._send_private_message(response, receiver_client, client)
+        else:
+            client.send(response.encode('utf-8'))
+
+    def _get_receiver_and_message(self, message: str) -> tuple[str, Optional[socket.socket]]:
+        receiver = re.findall(r'^(?:\S+\s){1}(\S+)', message)[0]
+        receiver_client = self.clients.inverse.get(receiver)
+        if receiver_client:
+            response = message.partition(f'/to {receiver} ')[2]
+            response = '<empty message>' if not response else response
+        else:
+            response = f'Member with nickname {receiver} not found'
+        return response, receiver_client
+
+    def _send_private_message(self, message: str, receiver: socket.socket, client: socket.socket):
+        status = receiver.sendall(f'{self.clients[client]} (private): {message}'.encode('utf-8'))
+        if status is None:
+            client.send('Message delivered'.encode('utf-8'))
+        else:
+            client.send('Message not delivered'.encode('utf-8'))
+
+
+if __name__ == '__main__':
+    server = Server()
