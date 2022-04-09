@@ -5,6 +5,8 @@ from typing import Optional
 
 from bidict import bidict
 
+from logging_config import log
+
 
 class Server:
     HOST: str = '127.0.0.1'
@@ -16,15 +18,16 @@ class Server:
     server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def __init__(self):
+        self.log = log
         self.server.bind((self.HOST, self.PORT))
         self.server.listen(self.NUMBER_OF_WAITING_CONNECTIONS)
-        print('Server start working...')
+        self.log.debug(f'Server start working on {self.HOST}:{self.PORT}...')
         self._receive_connection()
 
     def _receive_connection(self) -> None:
         while True:
             client, address = self.server.accept()
-            print(f'Connected from {str(address)}')
+            self.log.debug(f'Connected from {str(address)}')
             message_thread = threading.Thread(target=self._get_a_message_from_client, args=(client,))
             message_thread.start()
 
@@ -39,13 +42,14 @@ class Server:
                     self._message_for_all_clients(f'{self.clients[client]}: {message}')
             except:
                 nickname = self.clients.pop(client)
-                print(f'{nickname} left the chat')
+                self.log.debug(f'{nickname} left the chat')
                 self._message_for_all_clients(f'{nickname} left the chat')
                 break
 
     def _message_for_all_clients(self, message: str) -> None:
         for client in self.clients.keys():
             client.send(message.encode('utf-8'))
+            self.log.info(f'Message for all members: {message}')
 
     def _set_client_nickname(self, client: socket.socket) -> None:
         client.send('Input your nickname: '.encode('utf-8'))
@@ -53,10 +57,12 @@ class Server:
         while nickname in self.clients.values():
             client.send('This nickname already exists, please try again: '.encode('utf-8'))
             nickname = client.recv(1024).decode('utf-8')
+            self.log.debug(f'New user try to set a name ({nickname}), but it already exists')
         self._message_for_all_clients(f'{nickname} connected to the chat')
         self.clients[client] = nickname
         client.send(
             f'You are connect to the chat as {nickname}\nInput "/commands" to get a list of commands'.encode('utf-8'))
+        self.log.debug(f'New user set a name: {nickname}')
 
     def _handle_command(self, message: str, client: socket.socket) -> None:
         receiver_client = None
@@ -74,6 +80,7 @@ class Server:
             self._send_private_message(response, receiver_client, client)
         else:
             client.send(response.encode('utf-8'))
+            self.log.debug(f'{self.clients[client]} got response ({response}) to command "{message}"')
 
     def _get_receiver_and_message(self, message: str) -> tuple[str, Optional[socket.socket]]:
         receiver = re.findall(r'^(?:\S+\s){1}(\S+)', message)[0]
@@ -89,8 +96,11 @@ class Server:
         status = receiver.sendall(f'{self.clients[client]} (private): {message}'.encode('utf-8'))
         if status is None:
             client.send('Message delivered'.encode('utf-8'))
+            self.log.debug(f'Message from {self.clients[client]} successfully delivered to {self.clients[receiver]}')
+            self.log.info(f'{self.clients[client]} (private to {self.clients[receiver]}): {message}')
         else:
-            client.send('Message not delivered'.encode('utf-8'))
+            client.send(
+                f'Message from {self.clients[client]} not delivered to {self.clients[receiver]}'.encode('utf-8'))
 
 
 if __name__ == '__main__':
