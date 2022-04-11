@@ -3,8 +3,8 @@ import threading
 
 
 class Client:
-    HOST: str = '127.0.0.1'
-    PORT: int = 3228
+    HOST: str = '0.0.0.0'
+    PORT: int = 3229
 
     def __init__(self):
         self.client: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

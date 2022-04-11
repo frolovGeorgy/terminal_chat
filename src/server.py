@@ -1,7 +1,7 @@
 import socket
 import threading
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 from bidict import bidict
 
@@ -9,7 +9,7 @@ from logging_config import log
 
 
 class Server:
-    HOST: str = '127.0.0.1'
+    HOST: str = '0.0.0.0'
     PORT: int = 3228
     NUMBER_OF_WAITING_CONNECTIONS: int = 5
 
@@ -82,7 +82,7 @@ class Server:
             client.send(response.encode('utf-8'))
             self.log.debug(f'{self.clients[client]} got response ({response}) to command "{message}"')
 
-    def _get_receiver_and_message(self, message: str) -> tuple[str, Optional[socket.socket]]:
+    def _get_receiver_and_message(self, message: str) -> Tuple[str, Optional[socket.socket]]:
         receiver = re.findall(r'^(?:\S+\s){1}(\S+)', message)[0]
         receiver_client = self.clients.inverse.get(receiver)
         if receiver_client:
