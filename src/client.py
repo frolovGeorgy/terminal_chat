@@ -8,6 +8,8 @@ class Client:
 
     def __init__(self):
         self.client: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    def start(self):
         self.client.connect((self.HOST, self.PORT))
         self.nickname = self._set_nickname()
         receive_thread = threading.Thread(target=self._receive_a_message)
@@ -45,3 +47,4 @@ class Client:
 
 if __name__ == '__main__':
     client = Client()
+    client.start()

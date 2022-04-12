@@ -11,12 +11,6 @@ LOGGING_DICT = {
         }
     },
     'handlers': {
-        'syslog': {
-            'class': 'logging.handlers.SysLogHandler',
-            'address': '/dev/log',
-            'level': logging.INFO,
-            'formatter': 'base'
-        },
         'console': {
             'class': 'logging.StreamHandler',
             'stream': sys.stdout,
@@ -26,7 +20,7 @@ LOGGING_DICT = {
     },
     'loggers': {
         'syslog_logger': {
-            'handlers': ['syslog', 'console'],
+            'handlers': ['console'],
             'level': logging.INFO,
         }
     }

@@ -19,6 +19,8 @@ class Server:
 
     def __init__(self):
         self.log = log
+
+    def start(self):
         self.server.bind((self.HOST, self.PORT))
         self.server.listen(self.NUMBER_OF_WAITING_CONNECTIONS)
         self.log.debug(f'Server start working on {self.HOST}:{self.PORT}...')
@@ -105,3 +107,4 @@ class Server:
 
 if __name__ == '__main__':
     server = Server()
+    server.start()
