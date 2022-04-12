@@ -16,9 +16,9 @@ $ docker build -t terminal_chat .
 ```
 Запуск сервера
 ```
-$ docker run -p 3228:3228 terminal_chat server.py
+$ docker run -ti -p 3228:3228 terminal_chat server.py
 ```
 Подключение к серверу
 ```
-$ docker run -p 3228:3228 terminal_chat client.py
+$ docker run -ti --network host terminal_chat client.py
 ```
