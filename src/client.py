@@ -1,50 +1,50 @@
-import socket
-import threading
+import asyncio
+
+import aioconsole
+import websockets
+
+HOST = '0.0.0.0'
+PORT = 3228
+
+PING_INTERVAL = 5
+
+PING_TIMEOUT = 100
 
 
-class Client:
-    HOST: str = '0.0.0.0'
-    PORT: int = 3229
-
-    def __init__(self):
-        self.client: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    def start(self):
-        self.client.connect((self.HOST, self.PORT))
-        self.nickname = self._set_nickname()
-        receive_thread = threading.Thread(target=self._receive_a_message)
-        send_thread = threading.Thread(target=self._send_a_message)
-        receive_thread.start()
-        send_thread.start()
-
-    def _receive_a_message(self) -> None:
-        while True:
-            try:
-                message = self.client.recv(1024).decode('utf-8')
+async def connection_handler():
+    try:
+        async with websockets.connect(
+                f"ws://{HOST}:{PORT}",
+                ping_interval=PING_INTERVAL,
+                ping_timeout=PING_TIMEOUT
+        ) as websock:
+            name = input('Hello, please input your name: ')
+            await websock.send(name)
+            message = await websock.recv()
+            while message == 'This nickname already exists, please try again: ':
                 print(message)
-            except:
-                print('Something went wrong')
-                self.client.close()
-                break
+                name = await aioconsole.ainput()
+                await websock.send(name)
+                message = await websock.recv()
+            print(message)
+            await asyncio.gather(
+                send_message(websock),
+                get_message(websock),
+            )
+    except websockets.ConnectionClosed:
+        print('Connection closed')
 
-    def _send_a_message(self) -> None:
-        while True:
-            message = input()
-            self.client.send(message.encode('utf-8'))
 
-    def _set_nickname(self) -> str:
-        message = self.client.recv(1024).decode('utf-8')
-        nickname = input(message)
-        self.client.send(nickname.encode('utf-8'))
-        message = self.client.recv(1024).decode('utf-8')
-        while message == 'This nickname already exists, please try again: ':
-            nickname = input(message)
-            self.client.send(nickname.encode('utf-8'))
-            message = self.client.recv(1024).decode('utf-8')
+async def get_message(websock):
+    async for message in websock:
         print(message)
-        return nickname
+
+
+async def send_message(websock):
+    while True:
+        line = await aioconsole.ainput()
+        await websock.send(line)
 
 
 if __name__ == '__main__':
-    client = Client()
-    client.start()
+    asyncio.run(connection_handler())
