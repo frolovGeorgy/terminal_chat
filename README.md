@@ -1,3 +1,5 @@
+## Консольный чат
+### Функциональность:
 + сервер:
   + на TCP порт принимает запросы от клиентов;
   + поддерживает минимум 2-х клиентов единовременно;
@@ -9,16 +11,38 @@
   + отправляют сообщения;
   + получают подтверждение о доставке.
 
+### Используемые библиотеки
++ aioconsole==0.4.1
++ bidict==0.21.4
++ websockets==10.2
 
+### Сборка и запуск сервера на Docker
 Создание образа
 ```
 $ docker build -t terminal_chat .
 ```
 Запуск сервера
 ```
-$ docker run -p 3228:3228 terminal_chat server.py
+$ docker run -ti -p 3228:3228 terminal_chat server.py
 ```
 Подключение к серверу
 ```
-$ docker run -p 3228:3228 terminal_chat client.py
+$ docker run -ti --network host terminal_chat client.py
+```
+### На локальной машине
+Запуск виртуального окружения
+```
+$ pipenv shell
+```
+Установка зависимостей
+```
+$ pipenv install
+```
+Запуск сервера
+```
+$ python3 server.py
+```
+Запуск клиента
+```
+$ pipenv client.py
 ```

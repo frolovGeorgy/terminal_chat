@@ -1,110 +1,101 @@
-import socket
-import threading
+import asyncio
 import re
-from typing import Optional, Tuple
 
-from bidict import bidict
+import bidict
+import websockets
 
 from logging_config import log
 
+HOST = '0.0.0.0'
+PORT = 3228
 
-class Server:
-    HOST: str = '0.0.0.0'
-    PORT: int = 3228
-    NUMBER_OF_WAITING_CONNECTIONS: int = 5
+PING_INTERVAL = 5
 
-    clients: bidict[socket.socket, str] = bidict()
+PING_TIMEOUT = 100
 
-    server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+clients = bidict.bidict()
 
-    def __init__(self):
-        self.log = log
 
-    def start(self):
-        self.server.bind((self.HOST, self.PORT))
-        self.server.listen(self.NUMBER_OF_WAITING_CONNECTIONS)
-        self.log.debug(f'Server start working on {self.HOST}:{self.PORT}...')
-        self._receive_connection()
+async def handler(websock):
+    try:
+        await get_new_user(websock)
+        async for message in websock:
+            username = clients[websock]
+            if message.startswith('/'):
+                await command_handler(websock, message)
+            else:
+                websockets.broadcast(clients.keys(), f'{username}: {message}')
+            log.info(f'{username}: {message}')
+    finally:
+        username = clients.pop(websock)
+        websockets.broadcast(clients.keys(), f'{username} disconnected from server')
+        log.debug(f'{username} disconnected from server')
 
-    def _receive_connection(self) -> None:
-        while True:
-            client, address = self.server.accept()
-            self.log.debug(f'Connected from {str(address)}')
-            message_thread = threading.Thread(target=self._get_a_message_from_client, args=(client,))
-            message_thread.start()
 
-    def _get_a_message_from_client(self, client: socket.socket) -> None:
-        self._set_client_nickname(client)
-        while True:
-            try:
-                message = client.recv(1024).decode('utf-8')
-                if message.startswith('/'):
-                    self._handle_command(message, client)
-                else:
-                    self._message_for_all_clients(f'{self.clients[client]}: {message}')
-            except:
-                nickname = self.clients.pop(client)
-                self.log.debug(f'{nickname} left the chat')
-                self._message_for_all_clients(f'{nickname} left the chat')
-                break
+async def get_new_user(websock):
+    name = await websock.recv()
+    while name in clients.values():
+        await websock.send('This nickname already exists, please try again: ')
+        name = await websock.recv()
+    clients[websock] = name
+    await websock.send(f'Welcome to server, {name}!')
+    websockets.broadcast(clients.keys(), f'{name} connected')
 
-    def _message_for_all_clients(self, message: str) -> None:
-        for client in self.clients.keys():
-            client.send(message.encode('utf-8'))
-            self.log.info(f'Message for all members: {message}')
 
-    def _set_client_nickname(self, client: socket.socket) -> None:
-        client.send('Input your nickname: '.encode('utf-8'))
-        nickname = client.recv(1024).decode('utf-8')
-        while nickname in self.clients.values():
-            client.send('This nickname already exists, please try again: '.encode('utf-8'))
-            nickname = client.recv(1024).decode('utf-8')
-            self.log.debug(f'New user try to set a name ({nickname}), but it already exists')
-        self._message_for_all_clients(f'{nickname} connected to the chat')
-        self.clients[client] = nickname
-        client.send(
-            f'You are connect to the chat as {nickname}\nInput "/commands" to get a list of commands'.encode('utf-8'))
-        self.log.debug(f'New user set a name: {nickname}')
+async def command_handler(websock, message):
+    receiver_client = None
+    if message.startswith('/members'):
+        response = f'Current members: {[member for member in clients.values()]}'
+    elif message.startswith('/to'):
+        response, receiver_client = get_receiver_and_message(message)
+    elif message.startswith('/commands'):
+        response = 'Commands:\n- "/members" list of current members\n' \
+                   '- "/to <nickname>" send private message to member with nickname <nickname>'
+    else:
+        response = 'Command not found'
 
-    def _handle_command(self, message: str, client: socket.socket) -> None:
-        receiver_client = None
-        if message.startswith('/members'):
-            response = f'Current members: {[member for member in self.clients.values()]}'
-        elif message.startswith('/to'):
-            response, receiver_client = self._get_receiver_and_message(message)
-        elif message.startswith('/commands'):
-            response = 'Commands:\n- "/members" list of current members\n' \
-                       '- "/to <nickname>" send private message to member with nickname <nickname>'
-        else:
-            response = 'Command not found'
+    if receiver_client:
+        await send_private_message(response, receiver_client, websock)
+    else:
+        await websock.send(response)
+        log.debug(f'{clients[websock]} got response ({response}) to command "{message}"')
 
-        if receiver_client:
-            self._send_private_message(response, receiver_client, client)
-        else:
-            client.send(response.encode('utf-8'))
-            self.log.debug(f'{self.clients[client]} got response ({response}) to command "{message}"')
 
-    def _get_receiver_and_message(self, message: str) -> Tuple[str, Optional[socket.socket]]:
-        receiver = re.findall(r'^(?:\S+\s){1}(\S+)', message)[0]
-        receiver_client = self.clients.inverse.get(receiver)
-        if receiver_client:
-            response = message.partition(f'/to {receiver} ')[2]
-            response = '<empty message>' if not response else response
-        else:
-            response = f'Member with nickname {receiver} not found'
-        return response, receiver_client
+async def send_private_message(message, receiver, websock):
+    try:
+        await asyncio.sleep(10)
+        await receiver.send(f'{clients[websock]} (private): {message}')
+    except (websockets.ConnectionClosedOK, websockets.ConnectionClosedError, KeyError):
+        await websock.send(f'Message not delivered')
+        log.debug(f'Message from {clients[websock]} not delivered')
+    else:
+        await websock.send('Message delivered')
+        log.debug(f'Message from {clients[websock]} successfully delivered to {clients[receiver]}')
+        log.info(f'{clients[websock]} (private to {clients[receiver]}): {message}')
 
-    def _send_private_message(self, message: str, receiver: socket.socket, client: socket.socket):
-        status = receiver.sendall(f'{self.clients[client]} (private): {message}'.encode('utf-8'))
-        if status is None:
-            client.send('Message delivered'.encode('utf-8'))
-            self.log.debug(f'Message from {self.clients[client]} successfully delivered to {self.clients[receiver]}')
-            self.log.info(f'{self.clients[client]} (private to {self.clients[receiver]}): {message}')
-        else:
-            client.send(
-                f'Message from {self.clients[client]} not delivered to {self.clients[receiver]}'.encode('utf-8'))
+
+def get_receiver_and_message(message):
+    receiver = re.findall(r'^(?:\S+\s){1}(\S+)', message)[0]
+    receiver_client = clients.inverse.get(receiver)
+    if receiver_client:
+        response = message.partition(f'/to {receiver} ')[2]
+        response = '<empty message>' if not response else response
+    else:
+        response = f'Member with nickname {receiver} not found'
+    return response, receiver_client
+
+
+async def main():
+    log.debug('server starting...')
+    async with websockets.serve(
+            handler,
+            HOST,
+            PORT,
+            ping_interval=PING_INTERVAL,
+            ping_timeout=PING_TIMEOUT
+    ):
+        await asyncio.Future()
 
 
 if __name__ == '__main__':
-    server = Server()
-    server.start()
+    asyncio.run(main())
